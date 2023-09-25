@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "${GH_REBASE_PR_DEBUG_OUTPUT:-}" = "true" ]; then
+  set -x
+fi
+
+ARGS=$(getopt --options 'R:n::h' --longoptions 'repo:,pr:,help' -- "${@}")
+eval "set -- ${ARGS}"
+
+usage="Update a pull request.
+
+Without an argument, the pull request that belongs to the current branch
+is displayed.
+
+USAGE
+  gh update-pr [<number> | <url> | <branch>] [flags]
+
+FLAGS
+      --help                     Show help for command
+  -R, --repo [HOST/]OWNER/REPO   Select another repository using the [HOST/]OWNER/REPO format"
+
+while true; do
+  case "${1}" in
+    (--h | --help)
+      echo "$usage";
+      exit
+    ;;
+    (-R | --repo)
+      repo="${2}"
+      shift 2
+    ;;
+    (--)
+      shift
+      break
+    ;;
+    (*)
+      exit 1
+    ;;
+  esac
+done
+
+remaining_args=("${@}")
+
+if [ -n "${repo:-}" ] && [ -z "${remaining_args:-}" ]; then
+  echo "argument required when using the --repo flag"
+  echo "$usage" >&2;
+  exit 1
+fi
+
+details_args=()
+
+if [ -n "${repo:-}" ]; then
+  details_args+=( '--repo' )
+  details_args+=( "${repo}" )
+fi
+
+if [ -n "${remaining_args:-}" ]; then
+  details_args+=( "${remaining_args}" )
+fi
+
+pr_details=$(gh pr view --json headRepository,headRepositoryOwner,number $"${details_args[@]}")
+
+org=$(jq -r .headRepositoryOwner.login <<< "$pr_details")
+repo=$(jq -r .headRepository.name <<< "$pr_details")
+pr=$(jq -r .number <<< "$pr_details")
+
+
+gh api \
+  --method PUT \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  "/repos/$org/$repo/pulls/$pr/update-branch" \
+  -f update_method=rebase
